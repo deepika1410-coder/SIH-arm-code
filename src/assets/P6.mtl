@@ -1,0 +1,9 @@
+# WaveFront *.mtl file
+# Configured for Premium Matte Metallic Yellow Finish
+
+newmtl Steel_-_Satin
+Ka 0.150000 0.120000 0.020000        # Ambient reflection with a slight warm undertone
+Kd 0.950000 0.780000 0.050000        # Diffuse surface color (Rich Metallic Yellow/Gold base)
+Ks 0.350000 0.320000 0.150000        # Subdued specular glare with a warm metallic tint
+Ns 15.000000                         # Low roughness/tightness value to scatter highlights (Matte)
+d 1.000000                           # Fully solid opacity

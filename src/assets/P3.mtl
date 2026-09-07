@@ -1,0 +1,9 @@
+# WaveFront *.mtl file
+# Configured for Premium Matte Metallic Black Finish
+
+newmtl Steel_-_Satin
+Ka 0.050000 0.050000 0.050000        # Low ambient reflection to keep shadows deep black
+Kd 0.120000 0.130000 0.150000        # Diffuse surface color (Deep Charcoal/Black base)
+Ks 0.250000 0.250000 0.250000        # Subdued specular glare for a non-glossy, metallic sheen
+Ns 12.000000                         # Low roughness/tightness value to scatter highlights (Matte)
+d 1.000000                           # Fully solid opacity

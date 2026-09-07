@@ -1,0 +1,24 @@
+# Wavefront Material Template Library (.mtl)
+# Configured for Robotic Arm Forearm Assembly (P4)
+
+# ==========================================================
+# MATERIAL 1: MATTE BLACK (Brackets, Outer Housing, Servos)
+# ==========================================================
+newmtl Matte_Black
+Ka 0.05 0.05 0.05             # Deep dark ambient shadow baseline
+Kd 0.12 0.12 0.12             # Flat, dark charcoal/black diffuse surface
+Ks 0.03 0.03 0.03             # Subdued specular highlights to avoid high gloss
+Ns 8.0                        # Low shininess exponent for a scattered, matte finish
+Illum 2                       # Diffuse and specular shading turned on
+d 1.0                         # Fully opaque solid
+
+# ==========================================================
+# MATERIAL 2: STAINLESS STEEL (Central Connective Hydraulic Shaft)
+# ==========================================================
+newmtl SS_Steel
+Ka 0.22 0.24 0.26             # Slight cool metallic ambient undertone
+Kd 0.68 0.70 0.72             # Bright silver/grey reflective base
+Ks 0.90 0.90 0.90             # High intensity specular properties for polished steel look
+Ns 128.0                      # High shininess exponent for sharp, tightly focused highlights
+Illum 2                       # Diffuse and specular shading turned on
+d 1.0                         # Fully opaque solid
