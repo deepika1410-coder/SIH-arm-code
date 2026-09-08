@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Mission Control — Rover + Arm</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/roslibjs/1.3.0/roslib.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --panel: #ffffff;
+    --surface: #eef1f6;
+    --border: #d7dce3;
+    --text: #16202b;
+    --muted: #5c6b7a;
+    --green: #047857;
+    --amber: #b45309;
+    --red: #b91c1c;
+    --blue: #1d4ed8;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    overflow: hidden;
+  }
+
+  /* ---------- Tab panels ---------- */
+  .tab-panel { position: absolute; inset: 0; display: none; flex-direction: column; }
+  .tab-panel.active { display: flex; }
+
+  #rover-panel, #arm-panel { padding: 16px; padding-top: 20px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+  .pick-place-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  .btn.pick { background: var(--amber); color: #ffffff; }
+  .btn.place { background: var(--blue); color: #ffffff; }
+  .btn.big { padding: 20px 14px; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .btn.big .icon { font-size: 22px; }
+  .arm-last-result { font-size: 12px; color: var(--muted); margin-top: 12px; text-align: center; }
+
+  .link-row { display: flex; align-items: center; gap: 10px; }
+  .link-row .status-dot { width: 12px; height: 12px; }
+
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+
+  .conn-bar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; margin-bottom: 16px;
+  }
+  .conn-bar input {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 10px; font-size: 13px; flex: 1; min-width: 140px;
+  }
+  .conn-bar button {
+    background: var(--blue); border: none; color: #ffffff; font-weight: 600;
+    padding: 10px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .conn-bar button.disconnect { background: var(--red); }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+  .status-dot.connected { background: var(--green); }
+  .status-text { font-size: 12px; color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 700px) {
+    .grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(16,24,40,0.06); }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; }
+
+  .fsm-state {
+    font-size: 22px; font-weight: 700; padding: 12px 0; text-align: center;
+    border-radius: 8px; background: var(--surface); border: 1px solid var(--border);
+  }
+  .fsm-state.NAVIGATING { color: var(--green); }
+  .fsm-state.OBSTACLE_HALT { color: var(--red); }
+  .fsm-state.PICKING { color: var(--amber); }
+  .fsm-state.RESUME { color: var(--blue); }
+  .fsm-state.MANUAL_OVERRIDE { color: #7c3aed; }
+
+  .range-value { font-size: 30px; font-weight: 700; }
+  .range-unit { font-size: 13px; color: var(--muted); margin-left: 4px; }
+  .range-bar-track { height: 10px; background: var(--surface); border-radius: 6px; margin-top: 12px; border: 1px solid var(--border); overflow: hidden; }
+  .range-bar-fill { height: 100%; background: var(--green); width: 100%; transition: width 0.2s linear, background 0.2s linear; }
+  .range-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+  .cmdvel-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .cmdvel-row:last-child { border-bottom: none; }
+  .cmdvel-row span:last-child { font-family: "SF Mono", Consolas, monospace; color: var(--blue); }
+
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .btn { flex: 1; min-width: 120px; padding: 14px; border-radius: 8px; border: none; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .btn.trigger { background: var(--amber); color: #1a1300; }
+  .btn.stop { background: var(--red); color: #fff; }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .log {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px; height: 130px; overflow-y: auto; font-family: "SF Mono", Consolas, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .log div { margin-bottom: 4px; }
+  .log .ts { color: #94a2b3; margin-right: 6px; }
+
+  /* ---------- Manual drive card ---------- */
+  .override-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 14px;
+  }
+  .override-row .label { font-size: 13px; font-weight: 600; }
+  .override-row .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .switch { position: relative; width: 50px; height: 28px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider-toggle {
+    position: absolute; cursor: pointer; inset: 0; background: #b7c0cc;
+    border-radius: 28px; transition: background 0.2s;
+  }
+  .slider-toggle::before {
+    content: ""; position: absolute; height: 22px; width: 22px; left: 3px; bottom: 3px;
+    background: white; border-radius: 50%; transition: transform 0.2s;
+  }
+  .switch input:checked + .slider-toggle { background: var(--green); }
+  .switch input:checked + .slider-toggle::before { transform: translateX(22px); }
+  .switch input:disabled + .slider-toggle { opacity: 0.4; cursor: not-allowed; }
+
+  .dpad {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 10px;
+    max-width: 280px;
+    margin: 0 auto;
+    aspect-ratio: 1 / 1;
+  }
+  .dpad-btn {
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+    color: var(--text); display: flex; align-items: center; justify-content: center;
+    font-size: 26px; user-select: none; touch-action: none;
+    transition: background 0.1s, transform 0.1s;
+  }
+  .dpad-btn:active, .dpad-btn.pressed { background: var(--blue); color: #ffffff; transform: scale(0.95); }
+  .dpad-btn.stop-center:active, .dpad-btn.stop-center.pressed { background: var(--red); color: #ffffff; }
+  .dpad-btn:disabled, .dpad-btn.disabled { opacity: 0.3; pointer-events: none; }
+  .dpad-fwd { grid-column: 2; grid-row: 1; }
+  .dpad-left { grid-column: 1; grid-row: 2; }
+  .dpad-stop { grid-column: 2; grid-row: 2; font-size: 14px; font-weight: 700; }
+  .dpad-right { grid-column: 3; grid-row: 2; }
+  .dpad-back { grid-column: 2; grid-row: 3; }
+
+  .slider-row { margin-top: 16px; }
+  .slider-row label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .slider-row input[type="range"] { width: 100%; }
+
+  /* ---------- Joystick-style joint control ---------- */
+  .joystick-row { margin-top: 20px; }
+  .joystick-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .joystick-value { font-family: "SF Mono", Consolas, monospace; color: var(--text); font-weight: 700; }
+  .joystick-track {
+    position: relative; height: 46px; border-radius: 23px;
+    background: var(--surface); border: 1px solid var(--border);
+    touch-action: none; cursor: grab; user-select: none;
+  }
+  .joystick-track.disabled { opacity: 0.35; pointer-events: none; }
+  .joystick-center-mark {
+    position: absolute; top: 50%; left: 50%; width: 2px; height: 16px;
+    background: var(--border); transform: translate(-50%, -50%);
+  }
+  .joystick-knob {
+    position: absolute; top: 50%; left: 0%; width: 40px; height: 40px;
+    border-radius: 50%; background: var(--blue);
+    box-shadow: 0 2px 8px rgba(29,78,216,0.35);
+    transform: translate(-50%, -50%); transition: background 0.1s, box-shadow 0.1s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .joystick-knob::after { content: ""; width: 14px; height: 14px; border-radius: 50%; background: #fff; opacity: 0.9; }
+  .joystick-knob.dragging { background: var(--amber); box-shadow: 0 3px 10px rgba(180,83,9,0.45); cursor: grabbing; }
+
+  /* ---------- Single floating tab-switch icon ---------- */
+  #tabSwitchBtn {
+    position: fixed; top: 14px; right: 14px; z-index: 1000;
+    width: 48px; height: 48px; border-radius: 50%;
+    background: var(--panel); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; box-shadow: 0 4px 16px rgba(16,24,40,0.15);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  #tabSwitchBtn:active { transform: scale(0.92); }
+  #tabSwitchBtn svg { width: 22px; height: 22px; }
+  #tabSwitchLabel {
+    position: fixed; top: 22px; right: 68px; z-index: 1000;
+    font-size: 11px; color: var(--muted); background: var(--panel);
+    border: 1px solid var(--border); padding: 5px 9px; border-radius: 6px;
+    pointer-events: none; opacity: 0.9;
+  }
+</style>
+</head>
+<body>
+
+<div id="tabSwitchLabel">Switch to Arm</div>
+<div id="tabSwitchBtn" title="Switch view">
+  <svg id="tabIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M7 7h11l-3-3M17 17H6l3 3" stroke="#1d4ed8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</div>
+
+<!-- ================= ROVER TAB ================= -->
+<div class="tab-panel active" id="rover-panel">
+
+  <h1>Rover Dashboard</h1>
+  <div class="subtitle">Live monitor + manual drive via rosbridge</div>
+
+  <div class="conn-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <input id="wsUrl" type="text" value="ws://localhost:9090" />
+    <button id="connectBtn">Connect</button>
+  </div>
+
+  <div class="grid">
+
+    <!-- ===== Manual Drive card ===== -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2>Manual Drive</h2>
+
+      <div class="override-row">
+        <div>
+          <div class="label">Manual Control</div>
+          <div class="sub" id="overrideSub">Off — rover is autonomous</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="overrideToggle" disabled />
+          <span class="slider-toggle"></span>
+        </label>
+      </div>
+
+      <div class="dpad">
+        <button class="dpad-btn disabled dpad-fwd" data-dir="fwd">▲</button>
+        <button class="dpad-btn disabled dpad-left" data-dir="left">◀</button>
+        <button class="dpad-btn disabled stop-center dpad-stop" data-dir="stop">STOP</button>
+        <button class="dpad-btn disabled dpad-right" data-dir="right">▶</button>
+        <button class="dpad-btn disabled dpad-back" data-dir="back">▼</button>
+      </div>
+
+      <div class="slider-row">
+        <label><span>Drive speed</span><span id="speedVal">0.20 m/s</span></label>
+        <input type="range" id="speedSlider" min="0.05" max="0.5" step="0.01" value="0.2" />
+      </div>
+      <div class="slider-row">
+        <label><span>Turn rate</span><span id="turnVal">0.60 rad/s</span></label>
+        <input type="range" id="turnSlider" min="0.1" max="1.5" step="0.05" value="0.6" />
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>FSM State</h2>
+      <div class="fsm-state" id="fsmState">—</div>
+    </div>
+
+    <div class="card">
+      <h2>Ultrasonic Range</h2>
+      <div><span class="range-value" id="rangeValue">—</span><span class="range-unit">m</span></div>
+      <div class="range-bar-track"><div class="range-bar-fill" id="rangeBar"></div></div>
+      <div class="range-labels"><span>0.0 m</span><span id="thresholdLabel">0.15 m</span><span>2.0 m</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Commanded Velocity</h2>
+      <div class="cmdvel-row"><span>linear.x</span><span id="linX">0.000</span></div>
+      <div class="cmdvel-row"><span>linear.y</span><span id="linY">0.000</span></div>
+      <div class="cmdvel-row"><span>angular.z</span><span id="angZ">0.000</span></div>
+    </div>
+
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2>Event Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================= ARM TAB (native panel) ================= -->
+<div class="tab-panel" id="arm-panel">
+
+  <h1>Arm Console</h1>
+  <div class="subtitle">Pick &amp; place control via rosbridge — shares the Rover tab's connection</div>
+
+  <div class="grid">
+
+    <div class="card">
+      <h2>Link</h2>
+      <div class="link-row">
+        <div class="status-dot" id="armStatusDot"></div>
+        <div class="status-text" id="armStatusText">Disconnected</div>
+      </div>
+      <div class="arm-last-result" style="text-align:left; margin-top:10px;">Connect from the Rover tab to enable arm control.</div>
+    </div>
+
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2>Joint Control</h2>
+
+      <div class="joystick-row" style="margin-top: 0;">
+        <div class="joystick-label"><span>Base Rotation</span><span class="joystick-value" id="baseRotationVal">0°</span></div>
+        <div class="joystick-track disabled" id="baseRotationTrack" data-min="0" data-max="360" data-topic="/arm/base_rotation_deg" data-joint="Base Rotation">
+          <div class="joystick-center-mark"></div>
+          <div class="joystick-knob" id="baseRotationKnob"></div>
+        </div>
+        <div class="range-labels"><span>0°</span><span>180°</span><span>360°</span></div>
+      </div>
+
+      <div class="joystick-row">
+        <div class="joystick-label"><span>Shoulder Pitch</span><span class="joystick-value" id="shoulderPitchVal">0°</span></div>
+        <div class="joystick-track disabled" id="shoulderPitchTrack" data-min="-90" data-max="90" data-topic="/arm/shoulder_pitch_deg" data-joint="Shoulder Pitch">
+          <div class="joystick-center-mark"></div>
+          <div class="joystick-knob" id="shoulderPitchKnob"></div>
+        </div>
+        <div class="range-labels"><span>-90°</span><span>0°</span><span>90°</span></div>
+      </div>
+
+      <div class="joystick-row">
+        <div class="joystick-label"><span>Elbow Pitch</span><span class="joystick-value" id="elbowPitchVal">0°</span></div>
+        <div class="joystick-track disabled" id="elbowPitchTrack" data-min="-135" data-max="135" data-topic="/arm/elbow_pitch_deg" data-joint="Elbow Pitch">
+          <div class="joystick-center-mark"></div>
+          <div class="joystick-knob" id="elbowPitchKnob"></div>
+        </div>
+        <div class="range-labels"><span>-135°</span><span>0°</span><span>135°</span></div>
+      </div>
+
+      <div class="joystick-row">
+        <div class="joystick-label"><span>Wrist Pitch</span><span class="joystick-value" id="wristPitchVal">0°</span></div>
+        <div class="joystick-track disabled" id="wristPitchTrack" data-min="-90" data-max="90" data-topic="/arm/wrist_pitch_deg" data-joint="Wrist Pitch">
+          <div class="joystick-center-mark"></div>
+          <div class="joystick-knob" id="wristPitchKnob"></div>
+        </div>
+        <div class="range-labels"><span>-90°</span><span>0°</span><span>90°</span></div>
+      </div>
+
+      <div class="joystick-row">
+        <div class="joystick-label"><span>Camera Axis</span><span class="joystick-value" id="cameraAxisVal">0°</span></div>
+        <div class="joystick-track disabled" id="cameraAxisTrack" data-min="-180" data-max="180" data-topic="/arm/camera_axis_deg" data-joint="Camera Axis">
+          <div class="joystick-center-mark"></div>
+          <div class="joystick-knob" id="cameraAxisKnob"></div>
+        </div>
+        <div class="range-labels"><span>-180°</span><span>0°</span><span>180°</span></div>
+      </div>
+
+      <div class="arm-last-result" id="jointResult">No joint command sent yet.</div>
+    </div>
+
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2>Pick &amp; Place</h2>
+      <div class="pick-place-row">
+        <button class="btn pick big" id="pickBtn" disabled>
+          <span class="icon">⬆</span>
+          <span>Pick Up</span>
+        </button>
+        <button class="btn place big" id="placeBtn" disabled>
+          <span class="icon">⬇</span>
+          <span>Place Down</span>
+        </button>
+      </div>
+      <div class="arm-last-result" id="armLastResult">No action sent yet.</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  /* ============ Tab switching ============ */
+  const roverPanel = document.getElementById('rover-panel');
+  const armPanel = document.getElementById('arm-panel');
+  const tabSwitchBtn = document.getElementById('tabSwitchBtn');
+  const tabSwitchLabel = document.getElementById('tabSwitchLabel');
+  const tabIcon = document.getElementById('tabIcon');
+  const ROVER_ICON = '<path d="M7 7h11l-3-3M17 17H6l3 3" stroke="#1d4ed8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+  const ARM_ICON = '<path d="M17 7H6l3-3M7 17h11l-3 3" stroke="#b45309" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+  let onArmTab = false;
+  tabSwitchBtn.addEventListener('click', () => {
+    onArmTab = !onArmTab;
+    roverPanel.classList.toggle('active', !onArmTab);
+    armPanel.classList.toggle('active', onArmTab);
+    tabSwitchLabel.textContent = onArmTab ? 'Switch to Rover' : 'Switch to Arm';
+    tabIcon.innerHTML = onArmTab ? ARM_ICON : ROVER_ICON;
+  });
+
+  /* ============ ROS setup ============ */
+  const CMD_VEL_TOPIC = '/cmd_vel';
+  const RANGE_TOPIC = '/ultrasonic/range';
+  const STATE_TOPIC = '/rover_arm/state';
+  const ARM_SERVICE = '/arm/execute_pick';
+  const ARM_SERVICE_TYPE = 'std_srvs/srv/SetBool'; // data: true = pick up, false = place down
+  const OVERRIDE_SERVICE = '/rover_arm/set_manual_override';
+  const OVERRIDE_SERVICE_TYPE = 'std_srvs/srv/SetBool';
+  const OBSTACLE_THRESHOLD = 0.15;
+  const RANGE_MAX_DISPLAY = 2.0;
+  const DRIVE_PUBLISH_HZ = 10; // rate at which held D-pad buttons re-publish
+
+  let ros = null;
+  let cmdVelPub = null;
+  let armClient = null;
+  let overrideClient = null;
+  let jointPubs = {};
+  let manualEnabled = false;
+  let driveInterval = null;
+  let activeDir = null;
+
+  const el = (id) => document.getElementById(id);
+  const statusDot = el('statusDot');
+  const connectBtn = el('connectBtn');
+  const wsUrlInput = el('wsUrl');
+  const logEl = el('log');
+  const overrideToggle = el('overrideToggle');
+  const overrideSub = el('overrideSub');
+  const dpadBtns = document.querySelectorAll('.dpad-btn');
+  const speedSlider = el('speedSlider');
+  const turnSlider = el('turnSlider');
+  const pickBtn = el('pickBtn');
+  const placeBtn = el('placeBtn');
+  const armLastResult = el('armLastResult');
+  const armStatusDot = el('armStatusDot');
+  const armStatusText = el('armStatusText');
+  const jointTracks = document.querySelectorAll('.joystick-track');
+  const jointResult = el('jointResult');
+
+  el('thresholdLabel').textContent = `${OBSTACLE_THRESHOLD.toFixed(2)} m`;
+
+  function log(msg, color) {
+    const line = document.createElement('div');
+    const ts = new Date().toLocaleTimeString();
+    line.innerHTML = `<span class="ts">${ts}</span><span style="${color ? 'color:' + color : ''}">${msg}</span>`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+    while (logEl.childElementCount > 200) logEl.removeChild(logEl.firstChild);
+  }
+
+  function setConnected(connected) {
+    statusDot.classList.toggle('connected', connected);
+    connectBtn.textContent = connected ? 'Disconnect' : 'Connect';
+    connectBtn.classList.toggle('disconnect', connected);
+    overrideToggle.disabled = !connected;
+    pickBtn.disabled = !connected;
+    placeBtn.disabled = !connected;
+    jointTracks.forEach((t) => { t.classList.toggle('disabled', !connected); });
+    armStatusDot.classList.toggle('connected', connected);
+    armStatusText.textContent = connected ? 'Connected — arm control enabled' : 'Disconnected';
+    if (!connected) setManualUI(false);
+  }
+
+  function setManualUI(enabled) {
+    manualEnabled = enabled;
+    overrideToggle.checked = enabled;
+    overrideSub.textContent = enabled ? 'On — dashboard controls the rover' : 'Off — rover is autonomous';
+    dpadBtns.forEach((b) => b.classList.toggle('disabled', !enabled));
+  }
+
+  function connect() {
+    const url = wsUrlInput.value.trim();
+    ros = new ROSLIB.Ros({ url });
+    ros.on('connection', () => {
+      setConnected(true);
+      log(`Connected to rosbridge at ${url}`, '#047857');
+      subscribeAll();
+    });
+    ros.on('error', (err) => log(`Connection error: ${err}`, '#b91c1c'));
+    ros.on('close', () => { setConnected(false); log('Connection closed.', '#b91c1c'); });
+  }
+
+  function disconnect() {
+    stopDriving();
+    if (ros) ros.close();
+    ros = null;
+  }
+
+  function subscribeAll() {
+    new ROSLIB.Topic({ ros, name: STATE_TOPIC, messageType: 'std_msgs/msg/String' })
+      .subscribe((msg) => {
+        const stateEl = el('fsmState');
+        stateEl.textContent = msg.data;
+        stateEl.className = 'fsm-state ' + msg.data;
+      });
+
+    new ROSLIB.Topic({ ros, name: RANGE_TOPIC, messageType: 'sensor_msgs/msg/Range' })
+      .subscribe((msg) => {
+        const r = msg.range;
+        el('rangeValue').textContent = r.toFixed(3);
+        const pct = Math.max(0, Math.min(100, (r / RANGE_MAX_DISPLAY) * 100));
+        const bar = el('rangeBar');
+        bar.style.width = pct + '%';
+        bar.style.background = r <= OBSTACLE_THRESHOLD ? 'var(--red)' : 'var(--green)';
+      });
+
+    new ROSLIB.Topic({ ros, name: CMD_VEL_TOPIC, messageType: 'geometry_msgs/msg/Twist' })
+      .subscribe((msg) => {
+        el('linX').textContent = msg.linear.x.toFixed(3);
+        el('linY').textContent = msg.linear.y.toFixed(3);
+        el('angZ').textContent = msg.angular.z.toFixed(3);
+      });
+
+    cmdVelPub = new ROSLIB.Topic({ ros, name: CMD_VEL_TOPIC, messageType: 'geometry_msgs/msg/Twist' });
+    armClient = new ROSLIB.Service({ ros, name: ARM_SERVICE, serviceType: ARM_SERVICE_TYPE });
+    overrideClient = new ROSLIB.Service({ ros, name: OVERRIDE_SERVICE, serviceType: OVERRIDE_SERVICE_TYPE });
+    jointPubs = {};
+    jointTracks.forEach((t) => {
+      const topic = t.dataset.topic;
+      jointPubs[topic] = new ROSLIB.Topic({ ros, name: topic, messageType: 'std_msgs/msg/Float32' });
+    });
+  }
+
+  connectBtn.addEventListener('click', () => {
+    if (ros && ros.isConnected) disconnect(); else connect();
+  });
+
+  /* ============ Pick / Place controls ============ */
+  function callArm(pickUp, btnEl) {
+    if (!armClient) return;
+    const actionLabel = pickUp ? 'Pick Up' : 'Place Down';
+    pickBtn.disabled = true;
+    placeBtn.disabled = true;
+    log(`Calling ${ARM_SERVICE} (${actionLabel}) ...`, '#b45309');
+    armLastResult.textContent = `${actionLabel} — sending...`;
+    armClient.callService(new ROSLIB.ServiceRequest({ data: pickUp }), (result) => {
+      pickBtn.disabled = false;
+      placeBtn.disabled = false;
+      log(`Arm response: success=${result.success} "${result.message}"`, result.success ? '#047857' : '#b91c1c');
+      armLastResult.textContent = `${actionLabel} — ${result.success ? 'done' : 'failed'}: ${result.message}`;
+    }, (error) => {
+      pickBtn.disabled = false;
+      placeBtn.disabled = false;
+      log(`Arm call failed: ${error}`, '#b91c1c');
+      armLastResult.textContent = `${actionLabel} — call failed: ${error}`;
+    });
+  }
+
+  pickBtn.addEventListener('click', () => callArm(true, pickBtn));
+  placeBtn.addEventListener('click', () => callArm(false, placeBtn));
+
+  /* ============ Joint control (5 motors, gamepad-style drag knobs) ============ */
+  jointTracks.forEach((track) => {
+    const min = parseFloat(track.dataset.min);
+    const max = parseFloat(track.dataset.max);
+    const topic = track.dataset.topic;
+    const jointName = track.dataset.joint;
+    const knob = track.querySelector('.joystick-knob');
+    const valEl = el(track.id.replace('Track', 'Val'));
+    let dragging = false;
+    let currentValue = min + (max - min) / 2; // default rest position: mid-range (0° for symmetric joints)
+    if (min === 0) currentValue = min; // Base Rotation (0–360) rests at 0°
+
+    function setKnob(value) {
+      const pct = ((value - min) / (max - min)) * 100;
+      knob.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+      valEl.textContent = `${Math.round(value)}°`;
+    }
+
+    function valueFromClientX(clientX) {
+      const rect = track.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      return min + pct * (max - min);
+    }
+
+    function publishValue(value) {
+      const pub = jointPubs[topic];
+      if (!pub) return;
+      pub.publish(new ROSLIB.Message({ data: value }));
+      log(`Published ${jointName}: ${Math.round(value)}° on ${topic}`, '#1d4ed8');
+      jointResult.textContent = `Last: ${jointName} → ${Math.round(value)}°`;
+    }
+
+    track.addEventListener('pointerdown', (e) => {
+      if (track.classList.contains('disabled')) return;
+      dragging = true;
+      knob.classList.add('dragging');
+      track.setPointerCapture(e.pointerId);
+      currentValue = valueFromClientX(e.clientX);
+      setKnob(currentValue);
+    });
+    track.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      currentValue = valueFromClientX(e.clientX);
+      setKnob(currentValue);
+    });
+    track.addEventListener('pointerup', (e) => {
+      if (!dragging) return;
+      dragging = false;
+      knob.classList.remove('dragging');
+      track.releasePointerCapture(e.pointerId);
+      publishValue(currentValue);
+    });
+    track.addEventListener('pointercancel', () => {
+      dragging = false;
+      knob.classList.remove('dragging');
+    });
+
+    setKnob(currentValue);
+  });
+
+  /* ============ Manual override toggle ============ */
+  overrideToggle.addEventListener('change', () => {
+    if (!overrideClient) { overrideToggle.checked = false; return; }
+    const enable = overrideToggle.checked;
+    overrideToggle.disabled = true;
+    overrideClient.callService(new ROSLIB.ServiceRequest({ data: enable }), (result) => {
+      overrideToggle.disabled = false;
+      if (result.success) {
+        setManualUI(enable);
+        log(result.message, enable ? '#7c3aed' : '#1d4ed8');
+      } else {
+        overrideToggle.checked = !enable;
+        log(`Override request rejected: ${result.message}`, '#b91c1c');
+      }
+    }, (error) => {
+      overrideToggle.disabled = false;
+      overrideToggle.checked = !enable;
+      log(`Override service call failed: ${error}`, '#b91c1c');
+    });
+  });
+
+  /* ============ D-pad drive controls ============ */
+  function publishTwist(dir) {
+    if (!cmdVelPub) return;
+    const speed = parseFloat(speedSlider.value);
+    const turn = parseFloat(turnSlider.value);
+    let linear_x = 0, angular_z = 0;
+    switch (dir) {
+      case 'fwd': linear_x = speed; break;
+      case 'back': linear_x = -speed; break;
+      case 'left': angular_z = turn; break;
+      case 'right': angular_z = -turn; break;
+      case 'stop': default: break;
+    }
+    cmdVelPub.publish(new ROSLIB.Message({
+      linear: { x: linear_x, y: 0, z: 0 }, angular: { x: 0, y: 0, z: angular_z }
+    }));
+  }
+
+  function stopDriving() {
+    if (driveInterval) { clearInterval(driveInterval); driveInterval = null; }
+    if (activeDir && activeDir !== 'stop') publishTwist('stop');
+    activeDir = null;
+    dpadBtns.forEach((b) => b.classList.remove('pressed'));
+  }
+
+  function startDriving(dir, btnEl) {
+    if (!manualEnabled) return;
+    activeDir = dir;
+    btnEl.classList.add('pressed');
+    publishTwist(dir);
+    if (driveInterval) clearInterval(driveInterval);
+    if (dir !== 'stop') {
+      driveInterval = setInterval(() => publishTwist(dir), 1000 / DRIVE_PUBLISH_HZ);
+    }
+  }
+
+  dpadBtns.forEach((btn) => {
+    const dir = btn.dataset.dir;
+    const onPress = (e) => { e.preventDefault(); startDriving(dir, btn); };
+    const onRelease = (e) => { e.preventDefault(); stopDriving(); };
+    btn.addEventListener('touchstart', onPress, { passive: false });
+    btn.addEventListener('touchend', onRelease, { passive: false });
+    btn.addEventListener('touchcancel', onRelease, { passive: false });
+    btn.addEventListener('mousedown', onPress);
+    btn.addEventListener('mouseup', onRelease);
+    btn.addEventListener('mouseleave', onRelease);
+  });
+
+  speedSlider.addEventListener('input', () => { el('speedVal').textContent = `${parseFloat(speedSlider.value).toFixed(2)} m/s`; });
+  turnSlider.addEventListener('input', () => { el('turnVal').textContent = `${parseFloat(turnSlider.value).toFixed(2)} rad/s`; });
+
+  // Safety: if the page is hidden/backgrounded mid-drive (common on mobile
+  // when switching apps), stop publishing rather than leaving a stale
+  // non-zero command as the last thing the rover heard.
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopDriving(); });
+
+  setConnected(false);
+})();
+</script>
+
+</body>
+</html>
